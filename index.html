@@ -283,6 +283,18 @@
         .replace(/'/g,"&apos;");
     }
 
+    // NEW: read boolean-ish column and show Yes/No
+    function toYesNo(v){
+      if (v === null || v === undefined) return "No";
+      const s = String(v).trim().toLowerCase();
+      if (!s) return "No";
+      if (["yes","y","true","1","t"].includes(s)) return "Yes";
+      if (["no","n","false","0","f"].includes(s)) return "No";
+      // fallback: if it contains yes/true -> Yes else No
+      if (s.includes("yes") || s.includes("true")) return "Yes";
+      return "No";
+    }
+
     function createSvgIcon(label, fill){
       const size = MARKER_PX;
       const stroke = 1.5;
@@ -562,13 +574,7 @@
 
     /* =========================
        FIXED UNIT MIX EXTRACTION
-       =========================
-       Your sheet column headers are sometimes slightly different (e.g. "One-Bedroom Units"
-       vs "One-Bedroom Unit"). This function:
-       1) Tries exact candidates (singular/plural/spacing variations)
-       2) Falls back to regex matching against the row’s keys
-       3) Ensures values are numeric and returns 0 if blank
-    */
+       ========================= */
     function pickFirstExistingKey(row, candidates){
       for(const c of candidates){
         const v = row[c];
@@ -596,7 +602,6 @@
     }
 
     function unitMixFromRow(r){
-      // EXACT-ish candidates + regex fallbacks
       const studio = getCountFromRow(
         r,
         ["Studio Units", "Studios", "Studio Unit", "Studio"],
@@ -627,7 +632,6 @@
         /\bfour\b.*bed.*\bunit/i
       );
 
-      // If ALL are zero, treat as missing (don’t show line)
       const hasAny = (studio + one + two + three + four) > 0;
       if(!hasAny) return "";
 
@@ -655,14 +659,18 @@
         const buildingType = (r["Building Type"] || r["building type"] || "").toString().trim();
         const affordability = (r["Affordability"] || r["affordability"] || "").toString().trim();
 
+        // existing cap basis logic retained
         let capBasis = (r["Cap Rate Basis"] || r["cap rate basis"] || "").toString().trim();
-        const taxAdjRaw = (r["Tax Adjusted"] || r["tax adjusted"] || r["Tax-Adjusted"] || r["tax-adjusted"] || "").toString().trim();
-        const isTaxAdjusted = /tax\s*adjust/i.test(capBasis) || /tax\s*adjust/i.test(taxAdjRaw) || taxAdjRaw.toLowerCase()==="yes" || taxAdjRaw.toLowerCase()==="true";
+        const taxAdjRawOld = (r["Tax Adjusted"] || r["tax adjusted"] || r["Tax-Adjusted"] || r["tax-adjusted"] || "").toString().trim();
+        const isTaxAdjustedOld = /tax\s*adjust/i.test(capBasis) || /tax\s*adjust/i.test(taxAdjRawOld) || taxAdjRawOld.toLowerCase()==="yes" || taxAdjRawOld.toLowerCase()==="true";
         if(capBasis){
-          if(isTaxAdjusted && !/tax\s*adjust/i.test(capBasis)) capBasis = `${capBasis} (Tax Adjusted)`;
+          if(isTaxAdjustedOld && !/tax\s*adjust/i.test(capBasis)) capBasis = `${capBasis} (Tax Adjusted)`;
         } else {
-          if(isTaxAdjusted) capBasis = "Tax Adjusted";
+          if(isTaxAdjustedOld) capBasis = "Tax Adjusted";
         }
+
+        // NEW: explicit Yes/No based on "Tax Adjusted?"
+        const taxAdjustedYesNo = toYesNo(r["Tax Adjusted?"] || r["tax adjusted?"] || r["Tax Adjusted ?"] || r["tax adjusted ?"]);
 
         const notes = (r["Notes"] || r["notes"] || "").toString().trim();
         const unitMix = unitMixFromRow(r);
@@ -687,6 +695,7 @@
           📏 <b>Price per SF ($):</b> ${ppsf}<br>
           📉 <b>Cap Rate (%):</b> ${cap}<br>
           ${capBasis ? `🧠 <b>Cap Rate Basis:</b> ${escapeXml(capBasis)}<br>` : ``}
+          🧾 <b>Tax Adjusted?:</b> ${taxAdjustedYesNo}<br>
           <hr>
           🤝 <b>Buyer:</b> ${escapeXml((r["Buyer"] || r["buyer"] || "") + "")}<br>
           🏷️ <b>Seller:</b> ${escapeXml((r["Seller"] || r["seller"] || "") + "")}<br>
