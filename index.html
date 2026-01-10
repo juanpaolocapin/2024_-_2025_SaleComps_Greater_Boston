@@ -122,6 +122,7 @@
         <option value="Cap Rate (%)">Cap Rate (%)</option>
         <option value="No">No</option>
         <option value="Units">Units</option>
+              <option value="$/Unit Sale">$/Unit Sale</option>
       </select>
     </div>
 
@@ -165,7 +166,198 @@
       zoom: 10
     });
 
-    const geocoder = new MapboxGeocoder({
+
+    // Track current theme for styling overlays
+    let CURRENT_THEME = "dark"; // default
+
+    
+function formatPerUnitK(val){
+  const n = Number(val);
+  if (!isFinite(n) || n <= 0) return "";
+  return "$" + Math.round(n / 1000) + "k";
+}
+
+function applyRoadLabelTheme(){
+      // Apply different label styling for light vs dark basemap
+      if (!map.getLayer("roads-overlay-labels")) return;
+
+      if (CURRENT_THEME === "light"){
+        // Light theme: darker text, no halo (or minimal) for a cleaner look
+        map.setPaintProperty("roads-overlay-labels", "text-color", "#3F3F3F");
+        map.setPaintProperty("roads-overlay-labels", "text-halo-color", "#FFFFFF");
+        map.setPaintProperty("roads-overlay-labels", "text-halo-width", 0.0);
+        map.setPaintProperty("roads-overlay-labels", "text-opacity", 0.85);
+      } else {
+        // Dark theme: lighter text with dark halo for contrast
+        map.setPaintProperty("roads-overlay-labels", "text-color", "#BEBEBE");
+        map.setPaintProperty("roads-overlay-labels", "text-halo-color", "#000000");
+        map.setPaintProperty("roads-overlay-labels", "text-halo-width", 1.5);
+        map.setPaintProperty("roads-overlay-labels", "text-opacity", 0.80);
+      }
+    }
+
+
+    
+    // =======================
+    // Roads overlay (tileset)
+    // =======================
+    const ROADS_TILESET_ID = "juan1227.cy7anj3h"; // provided by user
+
+    function setDebug(msg){
+      const el = document.getElementById("debugStatus");
+      if (el) el.textContent = msg || "";
+    }
+
+    // Adds the road overlay to the CURRENT style (must be called after load/style.load).
+    function addRoadOverlay(){
+      try{
+        // Remove prior layers/sources (important when switching basemap styles)
+        const layerIds = [
+          "roads-overlay-glow",
+          "roads-overlay-core"
+        ];
+        layerIds.forEach(id => { if (map.getLayer(id)) map.removeLayer(id); });
+        if (map.getSource("roadsTileset")) map.removeSource("roadsTileset");
+
+        map.addSource("roadsTileset", {
+          type: "vector",
+          url: "mapbox://" + ROADS_TILESET_ID
+        });
+
+        // Wait until the vector source reveals its source-layer ids
+        const tryAddLayers = () => {
+          const src = map.getSource("roadsTileset");
+          const layerIds = (src && src.vectorLayerIds) ? src.vectorLayerIds : null;
+
+          // Common fallback names if vectorLayerIds isn't available in this build
+          const candidates = layerIds && layerIds.length ? layerIds : ["layer-0", "layer0", "roads", "road", "data"];
+
+          // We'll attempt the first candidate; if it fails, Mapbox will fire an error event we show in debugStatus.
+          const SOURCE_LAYER = candidates[0];
+
+          const colorCore = "#D4AF37"; // gold
+          const colorGlow = "#8C6A00"; // darker gold/bronze
+
+          const wCore = ["interpolate", ["linear"], ["zoom"], 6, 1.2, 10, 2.2, 14, 3.6, 16, 5.0];
+          const wGlow = ["interpolate", ["linear"], ["zoom"], 6, 3.0, 10, 5.0, 14, 8.0, 16, 11.0];
+
+          // Add glow then core
+          map.addLayer({
+            id: "roads-overlay-glow",
+            type: "line",
+            source: "roadsTileset",
+            "source-layer": SOURCE_LAYER,
+            layout: { "line-join": "round", "line-cap": "round" },
+            paint: {
+              "line-color": colorGlow,
+              "line-opacity": 0.10,
+              "line-width": wGlow,
+              "line-blur": 1
+            }
+          });
+
+          map.addLayer({
+            id: "roads-overlay-core",
+            type: "line",
+            source: "roadsTileset",
+            "source-layer": SOURCE_LAYER,
+            layout: { "line-join": "round", "line-cap": "round" },
+            paint: {
+              "line-color": colorCore,
+              "line-opacity": 0.10,
+              "line-width": wCore
+            }
+          });
+
+          
+          
+          
+          
+          
+          // ---- Highway labels (FIXED, CLASS-based) ----
+          if (map.getLayer("roads-overlay-labels")) map.removeLayer("roads-overlay-labels");
+
+          map.addLayer({
+            id: "roads-overlay-labels",
+            type: "symbol",
+            source: "roadsTileset",
+            "source-layer": SOURCE_LAYER,
+            // IMPORTANT: do NOT over-filter; just ensure something exists
+            filter: ["has", "HWY_SYMBOL"],
+            layout: {
+              "symbol-placement": "line",
+              "text-field": [
+                "case",
+                ["==", ["get", "CLASS"], 1],
+                  ["concat", "I-", ["to-string", ["get", "HWY_SYMBOL"]]],
+                ["==", ["get", "CLASS"], 2],
+                  ["concat", "Rt ", ["to-string", ["get", "HWY_SYMBOL"]]],
+                ["to-string", ["get", "HWY_SYMBOL"]]
+              ],
+              "text-font": ["Open Sans Semibold", "Arial Unicode MS Bold"],
+              "text-size": [
+                "interpolate",
+                ["linear"],
+                ["zoom"],
+                9, ["case", ["==", ["get", "CLASS"], 1], 12, 10],
+                12, ["case", ["==", ["get", "CLASS"], 1], 14, 12],
+                14, ["case", ["==", ["get", "CLASS"], 1], 16, 14],
+                16, ["case", ["==", ["get", "CLASS"], 1], 18, 15]
+              ],
+              "symbol-spacing": 450,
+              "text-rotation-alignment": "map",
+              "text-keep-upright": true,
+              "text-allow-overlap": true
+            },
+            paint: {
+              "text-color": "#9A9A9A",
+              "text-halo-color": "#000000",
+              "text-halo-width": 1.5,
+              "text-opacity": 0.8
+            }
+          });
+
+          applyRoadLabelTheme();
+// If we got vector layer ids, show them (helpful for debugging)
+          if (layerIds && layerIds.length){
+            setDebug("Road overlay loaded (source-layer: " + SOURCE_LAYER + ").");
+          } else {
+            setDebug("Road overlay added. If roads don't appear, open DevTools Console and check for tileset errors; you may need tileset visibility/token scope.");
+          }
+        };
+
+        // Add immediately; if vectorLayerIds isn't ready, wait for source load
+        const isLoadedNow = map.isSourceLoaded && map.isSourceLoaded("roadsTileset");
+        if (isLoadedNow){
+          tryAddLayers();
+        } else {
+          const handler = (e) => {
+            if (e && e.sourceId === "roadsTileset" && e.isSourceLoaded){
+              map.off("sourcedata", handler);
+              tryAddLayers();
+            }
+          };
+          map.on("sourcedata", handler);
+        }
+      } catch(err){
+        console.error(err);
+        setDebug("Road overlay error: " + (err && err.message ? err.message : String(err)));
+      }
+    }
+
+    // Surface Mapbox errors in the UI (helps catch 401/403 tileset permission issues)
+    map.on("error", (e) => {
+      try{
+        const msg = e && e.error && e.error.message ? e.error.message : "";
+        if (!msg) return;
+
+        // Only show tileset-related errors to avoid noise
+        if (msg.toLowerCase().includes("401") || msg.toLowerCase().includes("403") || msg.toLowerCase().includes("not authorized") || msg.toLowerCase().includes("forbidden")){
+          setDebug("Road tileset access error (likely token scope or tileset privacy). Make sure your tileset is PUBLIC or your token has tilesets:read.");
+        }
+      } catch(_){}
+    });
+const geocoder = new MapboxGeocoder({
       accessToken: mapboxgl.accessToken,
       mapboxgl,
       marker:false,
@@ -195,17 +387,22 @@
     const LINES_SOURCE_ID = "leader-lines";
     const LINES_LAYER_ID  = "leader-lines";
 
-    document.getElementById("lightBtn").onclick = ()=> switchStyle("mapbox://styles/mapbox/light-v11", "lightBtn");
-    document.getElementById("darkBtn").onclick  = ()=> switchStyle("mapbox://styles/mapbox/dark-v11", "darkBtn");
+    document.getElementById("lightBtn").onclick = ()=> switchStyle("mapbox://styles/mapbox/light-v11", "lightBtn", "light");
+    document.getElementById("darkBtn").onclick  = ()=> switchStyle("mapbox://styles/mapbox/dark-v11", "darkBtn", "dark");
 
     function setActive(id){
       document.querySelectorAll('.basemap-switcher button').forEach(b=>b.classList.remove("active"));
       document.getElementById(id).classList.add("active");
     }
-    function switchStyle(styleUrl, activeBtnId){
+    function switchStyle(styleUrl, activeBtnId, theme){
+      CURRENT_THEME = theme || CURRENT_THEME;
+
       map.setStyle(styleUrl);
       setActive(activeBtnId);
-      map.once("style.load", () => renderProjectMarkers(false));
+      map.once("style.load", () => {
+        addRoadOverlay();
+        renderProjectMarkers(false);
+      });
     }
 
     document.getElementById("labelField").value = "Cap Rate (%)";
@@ -273,6 +470,13 @@
       const pct = (n > 0 && n < 1) ? (n * 100) : n;
       return pct.toFixed(2) + "%";
     }
+
+    function fmtPerUnitK(v){
+      const n = Number((v ?? "").toString().replace(/[^0-9.\-]/g,""));
+      if(!isFinite(n) || n === 0) return "";
+      return "$" + Math.round(n/1000) + "k";
+    }
+
 
     function escapeXml(s){
       return String(s ?? "")
@@ -529,6 +733,12 @@
           if(labelField === "Cap Rate (%)") lbl = fmtPct(lbl);
           if(labelField === "No") lbl = (r["No"] || r["no"] || "").toString().trim() || "?";
 
+          if(labelField === "$/Unit Sale") {
+            // Directly use the sheet column: "Price per Unit ($)" (Column L)
+            const ppuRaw = r["Price per Unit ($)"] || r["price per unit ($)"];
+            lbl = fmtPerUnitK(ppuRaw);
+          }
+
           const el = document.createElement('div');
           el.style.backgroundImage = `url('${createSvgIcon(lbl, color)}')`;
           el.style.width = `${MARKER_PX}px`;
@@ -724,7 +934,13 @@
       document.getElementById('propertyDetail').classList.remove('visible');
     }
 
-    map.on("load", loadSheet);
-  </script>
+    map.on("load", () => {
+      CURRENT_THEME = "dark";
+      addRoadOverlay();
+      // apply label theme once layers exist
+      applyRoadLabelTheme();
+      loadSheet();
+    });
+</script>
 </body>
 </html>
